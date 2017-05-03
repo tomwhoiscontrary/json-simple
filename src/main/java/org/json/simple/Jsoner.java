@@ -112,43 +112,12 @@ public class Jsoner{
             switch(currentState){
                 case DONE:
                     /* The parse has finished a JSON value. */
-                    if(flags.contains(DeserializationOptions.ALLOW_CONCATENATED_JSON_VALUES) && !Yytoken.Types.END.equals(token.getType())){
-                        /* Since there could be multiple JSON values treat the parse as if it is in the initial state. */
-                        returnCount += 1;
-                        switch(token.getType()){
-                            case DATUM:
-                                /* A boolean, null, Number, or String could be detected. */
-                                if(flags.contains(DeserializationOptions.ALLOW_JSON_DATA)){
-                                    valueStack.addLast(token.getValue());
-                                    stateStack.addLast(States.DONE);
-                                }else{
-                                    throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
-                                }
-                                break;
-                            case LEFT_BRACE:
-                                /* An object is detected. */
-                                if(flags.contains(DeserializationOptions.ALLOW_JSON_OBJECTS)){
-                                    valueStack.addLast(new JsonObject());
-                                    stateStack.addLast(States.PARSING_OBJECT);
-                                }else{
-                                    throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
-                                }
-                                break;
-                            case LEFT_SQUARE:
-                                /* An array is detected. */
-                                if(flags.contains(DeserializationOptions.ALLOW_JSON_ARRAYS)){
-                                    valueStack.addLast(new JsonArray());
-                                    stateStack.addLast(States.PARSING_ARRAY);
-                                }else{
-                                    throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
-                                }
-                                break;
-                            default:
-                                /* Neither a JSON array or object was detected. */
-                                throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.UNEXPECTED_TOKEN, token);
-                        }
+                    if(!flags.contains(DeserializationOptions.ALLOW_CONCATENATED_JSON_VALUES) || Yytoken.Types.END.equals(token.getType())){
+                        break;
                     }
-                    break;
+                    /* Since there could be multiple JSON values treat the parse as if it is in the initial state. */
+                    returnCount += 1;
+                    /* Fall through to the case for the initial state */
                 case INITIAL:
                     /* The parse has just started. */
                     switch(token.getType()){
