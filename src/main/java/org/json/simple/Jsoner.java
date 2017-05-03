@@ -97,12 +97,29 @@ public class Jsoner{
      * @throws IOException if the underlying reader encounters an I/O error. Ensure the reader is properly instantiated,
      *         isn't closed, or that it is ready before trying again. */
     private static JsonArray deserialize(final Reader deserializable, final Set<DeserializationOptions> flags) throws DeserializationException, IOException{
+        final JsonAccumulator accumulator = new JsonAccumulator();
+        deserialize(deserializable, flags, accumulator);
+        return accumulator.finish();
+    }
+
+    /** Deserializes a readable stream according to the RFC 4627 JSON specification.
+     * @param readableDeserializable representing content to be deserialized as JSON.
+     * @param handler to receive the deserialization as a stream of events
+     * @throws DeserializationException if an unexpected token is encountered in the deserializable. To recover from a
+     *         DeserializationException: fix the deserializable
+     *         to no longer have an unexpected token and try again.
+     * @throws IOException if the underlying reader encounters an I/O error. Ensure the reader is properly instantiated,
+     *         isn't closed, or that it is ready before trying again. */
+    public static void deserialize(final Reader readableDeserializable, final JsonHandler handler) throws DeserializationException, IOException{
+        Jsoner.deserialize(readableDeserializable, EnumSet.of(DeserializationOptions.ALLOW_JSON_ARRAYS, DeserializationOptions.ALLOW_JSON_OBJECTS, DeserializationOptions.ALLOW_JSON_DATA), handler);
+    }
+
+    private static void deserialize(final Reader deserializable, final Set<DeserializationOptions> flags, final JsonHandler handler) throws DeserializationException, IOException {
         final Yylex lexer = new Yylex(deserializable);
         Yytoken token;
         States currentState;
         int returnCount = 1;
         final LinkedList<States> stateStack = new LinkedList<States>();
-        final JsonAccumulator valueStack = new JsonAccumulator();
         stateStack.addLast(States.INITIAL);
         //System.out.println("//////////DESERIALIZING//////////");
         do{
@@ -124,7 +141,7 @@ public class Jsoner{
                         case DATUM:
                             /* A boolean, null, Number, or String could be detected. */
                             if(flags.contains(DeserializationOptions.ALLOW_JSON_DATA)){
-                                valueStack.datum(token.getValue(), States.INITIAL);
+                                handler.datum(token.getValue(), States.INITIAL);
                                 stateStack.addLast(States.DONE);
                             }else{
                                 throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
@@ -133,7 +150,7 @@ public class Jsoner{
                         case LEFT_BRACE:
                             /* An object is detected. */
                             if(flags.contains(DeserializationOptions.ALLOW_JSON_OBJECTS)){
-                                valueStack.startObject(States.INITIAL);
+                                handler.startObject(States.INITIAL);
                                 stateStack.addLast(States.PARSING_OBJECT);
                             }else{
                                 throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
@@ -142,7 +159,7 @@ public class Jsoner{
                         case LEFT_SQUARE:
                             /* An array is detected. */
                             if(flags.contains(DeserializationOptions.ALLOW_JSON_ARRAYS)){
-                                valueStack.startArray(States.INITIAL);
+                                handler.startArray(States.INITIAL);
                                 stateStack.addLast(States.PARSING_ARRAY);
                             }else{
                                 throw new DeserializationException(lexer.getPosition(), DeserializationException.Problems.DISALLOWED_TOKEN, token);
@@ -164,24 +181,24 @@ public class Jsoner{
                             break;
                         case DATUM:
                             /* The parse found an element of the array. */
-                            valueStack.datum(token.getValue(), States.PARSING_ARRAY);
+                            handler.datum(token.getValue(), States.PARSING_ARRAY);
                             stateStack.addLast(currentState);
                             break;
                         case LEFT_BRACE:
                             /* The parse found an object in the array. */
-                            valueStack.startObject(States.PARSING_ARRAY);
+                            handler.startObject(States.PARSING_ARRAY);
                             stateStack.addLast(currentState);
                             stateStack.addLast(States.PARSING_OBJECT);
                             break;
                         case LEFT_SQUARE:
                             /* The parse found another array in the array. */
-                            valueStack.startArray(States.PARSING_ARRAY);
+                            handler.startArray(States.PARSING_ARRAY);
                             stateStack.addLast(currentState);
                             stateStack.addLast(States.PARSING_ARRAY);
                             break;
                         case RIGHT_SQUARE:
                             /* The parse found the end of the array. */
-                            if(!valueStack.endArray(returnCount)){
+                            if(!handler.endArray(returnCount)){
                                 /* The parse has been fully resolved. */
                                 stateStack.addLast(States.DONE);
                             }
@@ -205,7 +222,7 @@ public class Jsoner{
                                 /* JSON keys are always strings, strings are not always JSON keys but it is going to be
                                  * treated as one. Continue parsing the object. */
                                 final String key = (String)token.getValue();
-                                valueStack.key(key);
+                                handler.key(key);
                                 stateStack.addLast(currentState);
                                 stateStack.addLast(States.PARSING_ENTRY);
                             }else{
@@ -215,7 +232,7 @@ public class Jsoner{
                             break;
                         case RIGHT_BRACE:
                             /* The parse has found the end of the object. */
-                            if(!valueStack.endObject(returnCount)){
+                            if(!handler.endObject(returnCount)){
                                 /* The parse has been fully resolved. */
                                 stateStack.addLast(States.DONE);
                             }
@@ -235,18 +252,18 @@ public class Jsoner{
                             break;
                         case DATUM:
                             /* The parse has found a value for the parsed pair key. */
-                            valueStack.datum(token.getValue(), States.PARSING_OBJECT);
+                            handler.datum(token.getValue(), States.PARSING_OBJECT);
                             String key;
                             JsonObject parent;
                             break;
                         case LEFT_BRACE:
                             /* The parse has found an object for the parsed pair key. */
-                            valueStack.startObject(States.PARSING_OBJECT);
+                            handler.startObject(States.PARSING_OBJECT);
                             stateStack.addLast(States.PARSING_OBJECT);
                             break;
                         case LEFT_SQUARE:
                             /* The parse has found an array for the parsed pair key. */
-                            valueStack.startArray(States.PARSING_OBJECT);
+                            handler.startArray(States.PARSING_OBJECT);
                             stateStack.addLast(States.PARSING_ARRAY);
                             break;
                         default:
@@ -265,7 +282,6 @@ public class Jsoner{
             /* If we're not at the END and DONE then do the above again. */
         }while(!(States.DONE.equals(currentState) && Yytoken.Types.END.equals(token.getType())));
         //System.out.println("!!!!!!!!!!DESERIALIZED!!!!!!!!!!");
-        return valueStack.finish();
     }
 
     /** A convenience method that assumes a StringReader to deserialize a string.
